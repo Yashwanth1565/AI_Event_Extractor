@@ -4,16 +4,17 @@ import base64
 
 from groq import Groq
 from dotenv import load_dotenv
-
 from app.langfuse_config import langfuse
 
+# ---------- LOAD ENV ---------- #
+
 load_dotenv()
+
+# ---------- GROQ CLIENT ---------- #
 
 client = Groq(
     api_key=os.getenv("GROQ_API_KEY")
 )
-
-print(os.getenv("GROQ_API_KEY"))
 
 # ---------- DEFAULT RESPONSE ---------- #
 
@@ -27,7 +28,6 @@ def default_response():
         "organizer": "not_available"
     }
 
-
 # ---------- CLEAN JSON ---------- #
 
 def clean_json(raw_output):
@@ -39,30 +39,26 @@ def clean_json(raw_output):
         .strip()
     )
 
-
 # ---------- MAIN FUNCTION ---------- #
 
 def process_event_input(text=None, image=None):
 
-    trace = langfuse.trace(
-        name="event_extraction",
-        user_id="streamlit_user"
-    )
+    # ---------- CREATE TRACE ---------- #
 
-    generation = trace.generation(
-        name="groq-generation",
-        model="llama-3.3-70b-versatile",
-        input="multimodal_input"
+    trace = langfuse.trace(
+        name="AI_Event_Extraction_System"
     )
 
     prompt = """
-You are an intelligent event information extractor.
+You are an intelligent AI Event Information Extractor.
 
 Extract event details strictly in JSON format.
 
 RULES:
 1. Return ONLY valid JSON.
 2. Missing fields must be "not_available".
+3. No explanations.
+4. No markdown.
 
 Output Schema:
 {
@@ -76,7 +72,9 @@ Output Schema:
 
     try:
 
-        # ---------- TEXT INPUT ---------- #
+        # ====================================================
+        # TEXT INPUT FLOW
+        # ==================================================== #
 
         if text and text.strip() != "":
 
@@ -86,6 +84,12 @@ Output Schema:
 USER INPUT:
 {text}
 """
+
+            generation = trace.generation(
+                name="text_extraction",
+                model="llama-3.3-70b-versatile",
+                input=final_prompt
+            )
 
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -98,7 +102,11 @@ USER INPUT:
                 temperature=0
             )
 
-        # ---------- IMAGE INPUT ---------- #
+            raw_output = response.choices[0].message.content
+
+        # ====================================================
+        # IMAGE INPUT FLOW
+        # ==================================================== #
 
         elif image is not None:
 
@@ -107,6 +115,12 @@ USER INPUT:
             base64_image = base64.b64encode(
                 image_bytes
             ).decode("utf-8")
+
+            generation = trace.generation(
+                name="image_extraction",
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                input="uploaded_event_poster"
+            )
 
             response = client.chat.completions.create(
                 model="meta-llama/llama-4-scout-17b-16e-instruct",
@@ -130,15 +144,25 @@ USER INPUT:
                 temperature=0
             )
 
+            raw_output = response.choices[0].message.content
+
         else:
 
             return default_response()
 
-        raw_output = response.choices[0].message.content
+        # ---------- CLEAN OUTPUT ---------- #
 
-        cleaned_output = clean_json(raw_output)
+        cleaned_output = clean_json(
+            raw_output
+        )
 
-        parsed = json.loads(cleaned_output)
+        # ---------- PARSE JSON ---------- #
+
+        parsed = json.loads(
+            cleaned_output
+        )
+
+        # ---------- REQUIRED FIELDS ---------- #
 
         required_fields = [
             "event_name",
@@ -151,13 +175,39 @@ USER INPUT:
         for field in required_fields:
 
             if field not in parsed:
+
                 parsed[field] = "not_available"
 
-        generation.end(output=parsed)
+        # ---------- END GENERATION ---------- #
 
-        trace.update(output=parsed)
+        generation.end(
+            output=parsed
+        )
+
+        # ---------- UPDATE TRACE ---------- #
+
+        trace.update(
+            input={
+                "text": text if text else None,
+                "image_uploaded": True if image else False
+            },
+            output=parsed,
+            metadata={
+                "project": "AI Event Extractor",
+                "framework": "Streamlit",
+                "llm_provider": "Groq"
+            }
+        )
+
+        # ---------- FLUSH ---------- #
+
+        langfuse.flush()
 
         return parsed
+
+    # ====================================================
+    # ERROR HANDLING
+    # ==================================================== #
 
     except Exception as e:
 
@@ -165,8 +215,10 @@ USER INPUT:
 
         error_response["error"] = str(e)
 
-        generation.end(output=error_response)
+        trace.update(
+            output=error_response
+        )
 
-        trace.update(output=error_response)
+        langfuse.flush()
 
         return error_response

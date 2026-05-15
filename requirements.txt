@@ -1,6 +1,6 @@
 streamlit==1.45.1
 groq
 python-dotenv
-langfuse
+langfuse>=2.50.1
 Pillow
 pydantic
