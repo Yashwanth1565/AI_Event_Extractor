@@ -21,7 +21,7 @@ A Generative AI application that extracts structured event details from:
 - Prompt Engineering
 - Llama 4 Vision
 
-  ![Uploading image.png…]()
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/b901b388-baee-442a-91f6-4faa479f2bbb" />
 
 
 ## Output Schema
